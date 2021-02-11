@@ -1,10 +1,10 @@
 version: '3'
 services:
-  quats_forecasts: 
+  quants_forecast: 
     build:
       context: .
       dockerfile: Dockerfile
-    image: quants_forecasts
+    image: quants_forecast
     ports:
     - "8888:8888"
     volumes:
@@ -13,3 +13,4 @@ services:
     - ./notebook/:/notebook
     environment:
       PYTHONPATH: /opt/ml/src
+    tty: true
