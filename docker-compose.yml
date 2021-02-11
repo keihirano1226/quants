@@ -1,0 +1,15 @@
+version: '3'
+services:
+  quats_forecasts: 
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quants_forecasts
+    ports:
+    - "8888:8888"
+    volumes:
+    - ../data_dir:/data_dir
+    - ./Chapter02/archive:/opt/ml
+    - ./notebook/:/notebook
+    environment:
+      PYTHONPATH: /opt/ml/src
