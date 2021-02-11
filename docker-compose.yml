@@ -8,7 +8,7 @@ services:
     ports:
     - "8888:8888"
     volumes:
-    - ../data_dir:/data_dir
+    - ../quats_data_dir:/data_dir
     - ./Chapter02/archive:/opt/ml
     - ./notebook/:/notebook
     environment:
