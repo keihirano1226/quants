@@ -1,4 +1,5 @@
 {
-    "python.pythonPath": "/opt/conda/bin/python"
+    "python.pythonPath": "/opt/conda/bin/python",
+    "jupyter.jupyterServerType": "remote"
     
 }
