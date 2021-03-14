@@ -9,6 +9,7 @@ RUN pip install --upgrade pip && \
     pip install pandas && \
     pip install mplfinance && \
     pip install numpy && \
+    pip install pyti && \
     pip install opencv-python && \
     pip install scipy && \
     pip install matplotlib && \
