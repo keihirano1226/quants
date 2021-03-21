@@ -147,7 +147,11 @@ class ScoringService(object):
         return train_X, train_y, val_X, val_y, test_X, test_y
 
     @classmethod
-    def get_features_for_predict(cls, dfs, code, start_dt="2016-01-01"):
+    def cross_X(x):
+        return np.prod(x)
+        
+    @classmethod
+    def get_features_for_predict(dfs, code, start_dt="2016-01-01"):
         """
         Args:
             dfs (dict)  : dict of pd.DataFrame include stock_fin, stock_price
@@ -156,102 +160,235 @@ class ScoringService(object):
         Returns:
             feature DataFrame (pd.DataFrame)
         """
+        # おおまかな手順の1つ目
         # stock_finデータを読み込み
-        stock_fin = dfs["stock_fin"].copy()
-
+        stock_fin = dfs["stock_fin"]
+        periods = [10, 20, 40]
         # 特定の銘柄コードのデータに絞る
-        fin_data = stock_fin[stock_fin["Local Code"] == code].copy()
-        # 日付列をpd.Timestamp型に変換してindexに設定
-        fin_data["datetime"] = pd.to_datetime(fin_data["base_date"])
-        fin_data.set_index("datetime", inplace=True)
-        # fin_dataのnp.float64のデータのみを取得
-        fin_data = fin_data.select_dtypes(include=["float64"])
-        # 欠損値処理
-        fin_feats = fin_data.fillna(0)
-
+        stock_fin = stock_fin[stock_fin["Local Code"] == code]
+        fin_data = stock_fin[~stock_fin.duplicated(subset=['Local Code', 'Result_FinancialStatement ReportType',"Result_FinancialStatement FiscalYear"],keep='last')]
         # 特徴量の作成には過去60営業日のデータを使用しているため、
         # 予測対象日からバッファ含めて土日を除く過去90日遡った時点から特徴量を生成します
         n = 90
         # 特徴量の生成対象期間を指定
-        fin_feats = fin_feats.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :]
+        
+        fin_data = fin_data.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :]
+        seasons = stock_fin["Result_FinancialStatement ReportType"].unique()
+        columns = fin_data.columns
+        columns = columns.to_list()
+        columns_list = ["Result_FinancialStatement NetSales","Result_FinancialStatement OrdinaryIncome","Result_FinancialStatement TotalAssets","Result_FinancialStatement NetAssets"]
+        for column in columns_list:
+            a = "last "+column
+    #         print(a)
+    #         print(type(columns))
+            columns.append(a)
+        df_result = pd.DataFrame(index=[], columns=columns)
+        # columns_list.append("base_date")
+        # columns_list.append("Local Code")
+        for season in seasons:
+            #df["last "+column] = 0
+            #print(columns_list)
+            df_test = fin_data[fin_data["Result_FinancialStatement ReportType"]==season].copy()
+            for column in columns_list:
+                #print(columns)
+                df_test["last "+column] = df_test[column]
+                df_test["last "+column] = df_test[column].shift()
+                #df = pd.merge(df,df_test[["last "+column,"base_date","Local Code"]],on = ["base_date","Local Code"],how="left")
+                #df_ab, df_ac, on='a', how='left'
+            #print(df_result)
+            #print(df_test)
+            df_result = pd.concat([df_result,df_test])
+        df_result["NetSales_growth_rate"] = df_result["Result_FinancialStatement NetSales"] / df_result["last Result_FinancialStatement NetSales"]
+        df_result["OrdinaryIncome_growth_rate"] = df_result["Result_FinancialStatement OrdinaryIncome"] / df_result["last Result_FinancialStatement OrdinaryIncome"]
+        df_result["TotalAssets_growth_rate"] = df_result["Result_FinancialStatement TotalAssets"] / df_result["last Result_FinancialStatement TotalAssets"]
+        df_result["NetAssets_growth_rate"] = df_result["Result_FinancialStatement NetAssets"] / df_result["last Result_FinancialStatement NetAssets"]
+        #df_result = df_result.drop(["EndOfDayQuote ExchangeOfficialClose","macd_hist_shift","stocas_hist_shift","stocas_huge_signal"], axis=1)
+    #     # fin_dataのnp.float64のデータのみを取得
+    #     fin_data = fin_data.select_dtypes(include=["float64"])
+    #     # 欠損値処理
+    #     fin_feats = fin_data.fillna(0)
 
+        # おおまかな手順の2つ目
         # stock_priceデータを読み込む
-        price = dfs["stock_price"].copy()
+        price = dfs["stock_price"]
         # 特定の銘柄コードのデータに絞る
-        price_data = price[price["Local Code"] == code].copy()
-        # 日付列をpd.Timestamp型に変換してindexに設定
-        price_data["datetime"] = pd.to_datetime(price_data["EndOfDayQuote Date"])
-        price_data.set_index("datetime", inplace=True)
+        price_data = price[price["Local Code"] == code]
         # 終値のみに絞る
-        feats = price_data[["EndOfDayQuote ExchangeOfficialClose"]].copy()
+        feats = price_data[["EndOfDayQuote ExchangeOfficialClose"]]
         # 特徴量の生成対象期間を指定
-        feats = feats.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :]
+        feats = feats.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :].copy()
 
         # 終値の20営業日リターン
-        feats["return_1month"] = feats[
-            "EndOfDayQuote ExchangeOfficialClose"
-        ].pct_change(20)
+        feats["return_1month"] = feats["EndOfDayQuote ExchangeOfficialClose"].pct_change(20)
         # 終値の40営業日リターン
-        feats["return_2month"] = feats[
-            "EndOfDayQuote ExchangeOfficialClose"
-        ].pct_change(40)
+        feats["return_2month"] = feats["EndOfDayQuote ExchangeOfficialClose"].pct_change(40)
         # 終値の60営業日リターン
-        feats["return_3month"] = feats[
-            "EndOfDayQuote ExchangeOfficialClose"
-        ].pct_change(60)
+        feats["return_3month"] = feats["EndOfDayQuote ExchangeOfficialClose"].pct_change(60)
         # 終値の20営業日ボラティリティ
-        feats["volatility_1month"] = (
-            np.log(feats["EndOfDayQuote ExchangeOfficialClose"])
-            .diff()
-            .rolling(20)
-            .std()
+        feats["volatility_0.5month"] = (
+            np.log(feats["EndOfDayQuote ExchangeOfficialClose"]).diff().rolling(10).std()
         )
         # 終値の40営業日ボラティリティ
-        feats["volatility_2month"] = (
-            np.log(feats["EndOfDayQuote ExchangeOfficialClose"])
-            .diff()
-            .rolling(40)
-            .std()
+        feats["volatility_1month"] = (
+            np.log(feats["EndOfDayQuote ExchangeOfficialClose"]).diff().rolling(20).std()
         )
         # 終値の60営業日ボラティリティ
-        feats["volatility_3month"] = (
-            np.log(feats["EndOfDayQuote ExchangeOfficialClose"])
-            .diff()
-            .rolling(60)
-            .std()
+        feats["volatility_2month"] = (
+            np.log(feats["EndOfDayQuote ExchangeOfficialClose"]).diff().rolling(40).std()
         )
-        # 終値と20営業日の単純移動平均線の乖離
-        feats["MA_gap_1month"] = feats["EndOfDayQuote ExchangeOfficialClose"] / (
-            feats["EndOfDayQuote ExchangeOfficialClose"].rolling(20).mean()
-        )
-        # 終値と40営業日の単純移動平均線の乖離
-        feats["MA_gap_2month"] = feats["EndOfDayQuote ExchangeOfficialClose"] / (
-            feats["EndOfDayQuote ExchangeOfficialClose"].rolling(40).mean()
-        )
-        # 終値と60営業日の単純移動平均線の乖離
-        feats["MA_gap_3month"] = feats["EndOfDayQuote ExchangeOfficialClose"] / (
-            feats["EndOfDayQuote ExchangeOfficialClose"].rolling(60).mean()
-        )
+        
+        for period in periods:
+            col = "5 windows volatility  {} mean".format(period)
+            feats[col] = feats["volatility_0.5month"].rolling(period).mean()
+        
+        # ヒストリカル・ボラティリティ移動平均
+        for period in periods:
+            col = "25 windows volatility  {} mean".format(period)
+            feats[col] = feats["volatility_1month"].rolling(period).mean()
+            
+        # ヒストリカル・ボラティリティ移動平均
+        for period in periods:
+            col = "75 windows volatility  {} mean".format(period)
+            feats[col] = feats["volatility_2month"].rolling(period).mean()
+
+        # ヒストリカル・ボラティリティ移動平均微分値
+        for period in periods:
+            col = "5 windows volatility  {} mean diff".format(period)
+            feats[col] = feats["volatility_0.5month"].rolling(10).mean().pct_change(period)
+
+        # ヒストリカル・ボラティリティ移動平均微分値
+        for period in periods:
+            col = "25 windows volatility  {} mean diff".format(period)
+            feats[col] = feats["volatility_1month"].rolling(20).mean().pct_change(period)
+
+        # ヒストリカル・ボラティリティ移動平均微分値
+        for period in periods:
+            col = "75 windows volatility  {} mean diff".format(period)
+            feats[col] = feats["volatility_2month"].rolling(30).mean().pct_change(period)
+        
+        macd_period = {'long' : 26, 'short' : 12}
+        sma_period  = 9
+        feats['macd'] = macd(feats['EndOfDayQuote ExchangeOfficialClose'].values.tolist(), 12, 26)
+        feats['macd_signal'] = sma(feats['macd'].values.tolist(), sma_period)
+        feats["macd_hist"] = feats["macd"] - feats["macd_signal"]
+        feats["macd_hist_shift"] = feats["macd_hist"].shift()
+        feats.loc[feats["macd_hist"] < 0,"macd_hist_signal"] = -1
+        feats.loc[feats["macd_hist"] > 0,"macd_hist_signal"] = 1
+        feats.loc[feats["macd_hist"] == 0,"macd_hist_signal"] = 0
+        feats["macd_cross_signal"] = feats["macd_hist"]*feats["macd_hist_shift"]
+        feats.loc[feats["macd_cross_signal"] <= 0, "macd_cross_signal"] = 0
+        feats.loc[feats["macd_cross_signal"] > 0, "macd_cross_signal"] = 1
+        feats["macd_cross_sign_20"] = (1-feats["macd_cross_signal"].rolling(20).apply(cross_X))*feats["macd_hist_signal"]
+        feats["macd_cross_sign_10"] = (1-feats["macd_cross_signal"].rolling(10).apply(cross_X))*feats["macd_hist_signal"]
+        feats["macd_cross_sign_5"] = (1-feats["macd_cross_signal"].rolling(5).apply(cross_X))*feats["macd_hist_signal"]
+        #feats.loc[feats["macd_cross_sign"] > 0, "macd_cross_sign"] = 1
+        mac_cols = ["macd","macd_signal","macd_hist"]
+        mac_cross_cols = ["macd_cross_sign_20","macd_cross_sign_10"]
+        feats["slow%k"] = srv_d(feats["EndOfDayQuote ExchangeOfficialClose"].values.tolist(), 14)*100
+        feats["slow%d"] = feats["slow%k"].rolling(3).mean()
+        feats["stocas_hist"] = feats["slow%k"] - feats["slow%d"]
+        feats["stocas_hist_shift"] = feats["stocas_hist"].shift()
+        feats["stocas_cross_signal"] = feats["stocas_hist"]*feats["stocas_hist_shift"]
+        feats.loc[feats["stocas_cross_signal"] <= 0, "stocas_cross_signal"] = 0
+        feats.loc[feats["stocas_cross_signal"] > 0, "stocas_cross_signal"] = 1
+        feats.loc[feats["stocas_hist"] < 0,"stocas_hist_signal"] = -1
+        feats.loc[feats["stocas_hist"] > 0,"stocas_hist_signal"] = 1
+        feats.loc[feats["stocas_hist"] == 0,"stocas_hist_signal"] = 0
+        feats["stocas_huge_signal"] = 0
+        feats.loc[feats["slow%k"] <= 20,"stocas_huge_signal"] = 1
+        feats.loc[feats["slow%k"] >= 80,"stocas_huge_signal"] = 1
+        
+        # feats["stocas_cross_sign_20"] = (1-feats["stocas_cross_signal"].rolling(20).apply(cross_X))*feats["stocas_hist_signal"]*feats["stocas_huge_signal"]
+        # feats["stocas_cross_sign_10"] = (1-feats["stocas_cross_signal"].rolling(10).apply(cross_X))*feats["stocas_hist_signal"]*feats["stocas_huge_signal"]
+        feats["stocas_cross_sign_5"] = (1-feats["stocas_cross_signal"].rolling(5).apply(cross_X))*feats["stocas_hist_signal"]*feats["stocas_huge_signal"]
+        
+        
+        # おおまかな手順の3つ目
         # 欠損値処理
-        feats = feats.fillna(0)
+        #feats = feats.fillna(0)
         # 元データのカラムを削除
-        feats = feats.drop(["EndOfDayQuote ExchangeOfficialClose"], axis=1)
+        
+        
+        #財務データの特徴量とマーケットデータの特徴量のインデックスを合わせる
+        feats = feats.loc[feats.index.isin(df_result.index)]
+        df_result = df_result.loc[df_result.index.isin(feats.index)]
+        feats = pd.merge(df_result,feats,left_index= True,right_index = True ,how = "left")
+        stock_list = dfs["stock_list"]
+        stock_data = stock_list[stock_list["Local Code"] == code]
+        stock_data = stock_data[["33 Sector(Code)","17 Sector(Code)","IssuedShareEquityQuote IssuedShare","Size (New Index Series)"]]
+        sector_17_dict = {1:0.041404, 2:0.056027, 3:0.052955, 4:0.064411, 5:0.091106, 6:0.046410, 7:0.047056, 8:0.070079, 9:0.052416, 10:0.061940, 11:0.062365, 12:0.052021,
+                        13:0.022329, 14:0.030389, 15:0.190156, 16:0.109204, 17:0.083384}
+        sector_33_dict = {50:	0.026789,
+                            1050: 0.075618,
+                            2050: 0.052140,
+                            3050: 0.042869,
+                            3100: 0.044244,
+                            3150: 0.035982,
+                            3200: 0.074299,
+                            3250: 0.091106,
+                            3300: 0.043225,
+                            3350: 0.076820,
+                            3400: 0.060586,
+                            3450: 0.047813,
+                            3500: 0.045698,
+                            3550: 0.050873,
+                            3600: 0.070079,
+                            3650: 0.050197,
+                            3700: 0.042787,
+                            3750: 0.060784,
+                            3800: 0.043177,
+                            4050: 0.062365,
+                            5050: 0.059168,
+                            5100: 0.024505,
+                            5150: 0.063092,
+                            5200: 0.047985,
+                            5250: 0.069475,
+                            6050: 0.022329,
+                            6100: 0.030389,
+                            7050: 0.190156,
+                            7100: 0.131484,
+                            7150: 0.061564,
+                            7200: 0.125792,
+                            8050: 0.083384,
+                            9050: 0.061318}
+    #     print("hello")
+    #     print(stock_data["33 Sector(Code)"])
+        topix_dict = {'TOPIX Small 2':1, 'TOPIX Mid400':3, 'TOPIX Small 1':2, '-':0,'TOPIX Large70':4, 'TOPIX Core30':5}
+        feats["en_33"] = sector_33_dict[stock_list["33 Sector(Code)"].values[0]]
+        feats["en_17"] = sector_17_dict[stock_data["17 Sector(Code)"].values[0]]
+        feats["Ordinary_rate_of_return"] = feats["Result_FinancialStatement OrdinaryIncome"] / feats["Result_FinancialStatement NetSales"]
 
-        # 財務データの特徴量とマーケットデータの特徴量のインデックスを合わせる
-        feats = feats.loc[feats.index.isin(fin_feats.index)]
-        fin_feats = fin_feats.loc[fin_feats.index.isin(feats.index)]
+        feats["sector17's_Ordinary_rate_of_return_diff"] = feats["Ordinary_rate_of_return"] - feats["en_33"]
+        feats["sector33's_Ordinary_rate_of_return_diff"] = feats["Ordinary_rate_of_return"] - feats["en_17"]
+        feats["en_topix"] = topix_dict[stock_data["Size (New Index Series)"].values[0]]
+        feats["IssuedShareEquityQuote IssuedShare"] = stock_data["IssuedShareEquityQuote IssuedShare"]
+        feats["Net_income_per_stock"] = feats["Result_FinancialStatement NetIncome"] / feats["IssuedShareEquityQuote IssuedShare"]
+        #stock_data = stock_data["en_33","en_17","IssuedShareEquityQuote IssuedShare"]
+        feats["PBR"] =feats["EndOfDayQuote ExchangeOfficialClose"] * feats["IssuedShareEquityQuote IssuedShare"] / feats["Result_FinancialStatement NetAssets"]
+        feats["stability"] = feats["Result_FinancialStatement NetAssets"] / feats["Result_FinancialStatement TotalAssets"]
+        feats["ROE"] = feats["Result_FinancialStatement NetIncome"] / feats["Result_FinancialStatement NetAssets"]
+        feats["ROA"] = feats["Result_FinancialStatement NetIncome"] / feats["Result_FinancialStatement TotalAssets"]
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromOperatingActivities'] <= 0, 'Operating_cash_flow'] = 0
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromOperatingActivities'] > 0, 'Operating_cash_flow'] = 4
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromFinancingActivities'] <= 0, 'Financial_cash_flow'] = 0
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromFinancingActivities'] > 0, 'Financial_cash_flow'] = 1
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromInvestingActivities'] <= 0, 'Investing_cash_flow'] = 0
+        feats.loc[feats['Result_FinancialStatement CashFlowsFromInvestingActivities'] > 0, 'Investing_cash_flow'] = 2
+        feats["cash_evaluation"] = feats["Operating_cash_flow"] + feats["Financial_cash_flow"] + feats["Investing_cash_flow"]
+        feats = feats.drop(["EndOfDayQuote ExchangeOfficialClose","macd_hist_shift","stocas_hist_shift","stocas_huge_signal","Operating_cash_flow","Operating_cash_flow","Financial_cash_flow",
+                        "Investing_cash_flow","macd_cross_signal","Result_FinancialStatement FiscalYear","Forecast_FinancialStatement FiscalYear","Forecast_Dividend FiscalYear","Result_Dividend FiscalYear"
+                        ,"en_33","en_17","Ordinary_rate_of_return"], axis=1)
+        
 
-        # データを結合
-        feats = pd.concat([feats, fin_feats], axis=1).dropna()
 
+        feats = feats.select_dtypes(include=[int, float])
+        feats = feats.astype('float64')
         # 欠損値処理を行います。
         feats = feats.replace([np.inf, -np.inf], 0)
 
         # 銘柄コードを設定
         feats["code"] = code
 
-        # 生成対象日以降の特徴量に絞る
-        feats = feats.loc[pd.Timestamp(start_dt) :]
 
         return feats
 
