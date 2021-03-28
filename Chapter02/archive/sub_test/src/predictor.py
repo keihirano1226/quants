@@ -184,17 +184,7 @@ class ScoringService(object):
     @classmethod
     def cross_X(cls,x):
         return np.prod(x)
-    @classmethod
-    def sector_diff(cls,df,column):
-        columns=[column,"33 Sector(Code)"]
-        sector_df = df[columns].groupby('33 Sector(Code)').median()
-        sector_df = sector_df.rename(columns = {column:"sector_mean_"+column})
-        df = pd.merge(df,sector_df,how="left",on="33 Sector(Code)")
-        new_column_name = "true_" + column 
-        df[new_column_name] = df[column] - df["sector_mean_"+column]
-        df = df.drop(columns=("sector_mean_"+column))
-        return df
-
+        
     @classmethod
     def get_features_for_predict(cls,dfs, code, start_dt="2016-01-01"):
         """
@@ -212,23 +202,18 @@ class ScoringService(object):
         # 特定の銘柄コードのデータに絞る
         stock_fin = stock_fin[stock_fin["Local Code"] == code]
         fin_data = stock_fin[~stock_fin.duplicated(subset=['Local Code', 'Result_FinancialStatement ReportType',"Result_FinancialStatement FiscalYear"],keep='last')]
-        #前年の
-        stock_labels=dfs["stock_labels"]
-        stock_labels=stock_labels[stock_labels["Local Code"] == code]
-        #print(stock_labels)
-        fin_data = pd.merge(fin_data,stock_labels[["label_high_20","label_high_10","label_high_5","label_low_20","label_low_10","label_low_5"]],left_index = True,right_index = True)
         # 特徴量の作成には過去60営業日のデータを使用しているため、
         # 予測対象日からバッファ含めて土日を除く過去90日遡った時点から特徴量を生成します
         n = 90
         # 特徴量の生成対象期間を指定
-        start_dt2 = "2019-01-01"
-        fin_data = fin_data.loc[pd.Timestamp(start_dt2) - pd.offsets.BDay(n) :]
+        
+        fin_data = fin_data.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :]
         seasons = stock_fin["Result_FinancialStatement ReportType"].unique()
         columns = fin_data.columns
         columns = columns.to_list()
         #columns_list = ["Result_FinancialStatement NetSales","Result_FinancialStatement OrdinaryIncome","Result_FinancialStatement TotalAssets","Result_FinancialStatement NetAssets"]
         columns_list = ["Result_FinancialStatement NetSales","Result_FinancialStatement OrdinaryIncome","Result_FinancialStatement TotalAssets","Result_FinancialStatement NetAssets",
-                   'Result_Dividend QuarterlyDividendPerShare','Result_Dividend AnnualDividendPerShare',"label_high_20","label_high_10","label_high_5","label_low_20","label_low_10","label_low_5"]
+                   'Result_Dividend QuarterlyDividendPerShare','Result_Dividend AnnualDividendPerShare']
         for column in columns_list:
             a = "last "+column
     #         print(a)
@@ -270,7 +255,7 @@ class ScoringService(object):
         # 終値のみに絞る
         feats = price_data[["EndOfDayQuote ExchangeOfficialClose","EndOfDayQuote Volume"]]
         # 特徴量の生成対象期間を指定
-        feats = feats.loc[pd.Timestamp(start_dt2) - pd.offsets.BDay(n) :].copy()
+        feats = feats.loc[pd.Timestamp(start_dt) - pd.offsets.BDay(n) :].copy()
 
         # 終値の20営業日リターン
         feats["return_1month"] = feats["EndOfDayQuote ExchangeOfficialClose"].pct_change(20)
@@ -358,8 +343,7 @@ class ScoringService(object):
         stock_list = dfs["stock_list"]
         stock_data = stock_list[stock_list["Local Code"] == code]
         stock_data = stock_data[["33 Sector(Code)","17 Sector(Code)","IssuedShareEquityQuote IssuedShare","Size (New Index Series)"]]
-        #feats["IssuedShareEquityQuote IssuedShare"] = stock_data["IssuedShareEquityQuote IssuedShare"]
-        feats["IssuedShareEquityQuote IssuedShare"] = stock_data["IssuedShareEquityQuote IssuedShare"].values[0]
+        feats["IssuedShareEquityQuote IssuedShare"] = stock_data["IssuedShareEquityQuote IssuedShare"]
         #出来高移動平均線
         feats["Volume_5"] = feats["EndOfDayQuote Volume"].rolling(5).mean() / feats["IssuedShareEquityQuote IssuedShare"]
         feats["Volume_20"] = feats["EndOfDayQuote Volume"].rolling(20).mean() / feats["IssuedShareEquityQuote IssuedShare"]
@@ -460,11 +444,10 @@ class ScoringService(object):
         
         feats['Forecast_QuarterlyDividendPerShare_growth_rate'] = feats['Forecast_Dividend QuarterlyDividendPerShare'] / feats['Result_Dividend QuarterlyDividendPerShare'] 
         feats['forecast_AnnualDividendPerShare_growth_rate'] = feats['Forecast_Dividend AnnualDividendPerShare'] / feats['Result_Dividend AnnualDividendPerShare']
-        #時価総額
-        feats["market_cap"] = feats["EndOfDayQuote ExchangeOfficialClose"]*feats["IssuedShareEquityQuote IssuedShare"]
         
         
-        feats = feats.drop(["macd_hist_shift","stocas_hist_shift","stocas_huge_signal","Operating_cash_flow","Operating_cash_flow","Financial_cash_flow",
+        
+        feats = feats.drop(["EndOfDayQuote ExchangeOfficialClose","macd_hist_shift","stocas_hist_shift","stocas_huge_signal","Operating_cash_flow","Operating_cash_flow","Financial_cash_flow",
                         "Investing_cash_flow","macd_cross_signal","Result_FinancialStatement FiscalYear","Forecast_FinancialStatement FiscalYear","Forecast_Dividend FiscalYear","Result_Dividend FiscalYear"
                         ,"en_33","en_17","Ordinary_rate_of_return","Result_FinancialStatement CashFlowsFromOperatingActivities","Result_FinancialStatement CashFlowsFromFinancingActivities",
                         "Result_FinancialStatement CashFlowsFromInvestingActivities","Result_FinancialStatement NetSales","Result_FinancialStatement OperatingIncome",
@@ -473,8 +456,7 @@ class ScoringService(object):
                         "Forecast_FinancialStatement OperatingIncome","Forecast_FinancialStatement OrdinaryIncome","Forecast_FinancialStatement NetIncome","Result_Dividend QuarterlyDividendPerShare",
                         "Result_Dividend AnnualDividendPerShare","last Result_FinancialStatement NetSales","last Result_FinancialStatement OrdinaryIncome","last Result_FinancialStatement TotalAssets"
                         ,"last Result_FinancialStatement NetAssets","last Result_Dividend QuarterlyDividendPerShare","last Result_Dividend AnnualDividendPerShare",
-                        "Forecast_Dividend QuarterlyDividendPerShare","Forecast_Dividend AnnualDividendPerShare","volume_hist_shift","volume_hist_signal","volume_cross_signal","volume_hist_signal",
-                        "label_high_20","label_high_10","label_high_5","label_low_20","label_low_10","label_low_5"], axis=1)
+                        "Forecast_Dividend QuarterlyDividendPerShare","Forecast_Dividend AnnualDividendPerShare","volume_hist_shift","volume_hist_signal","volume_cross_signal","volume_hist_signal"], axis=1)
         
 
             
@@ -488,14 +470,11 @@ class ScoringService(object):
                           "NetAssets_growth_rate":np.nan,"QuarterlyDividendPerShare_growth_rate":np.nan,"AnnualDividendPerShare_growth_rate":np.nan,
                           "forecast_NetSales_growth_rate":np.nan,"forecast_OrdinaryIncome_growth_rate":np.nan,"forecast_NetIncome_growth_rate":np.nan,
                           "Forecast_QuarterlyDividendPerShare_growth_rate":np.nan,"forecast_AnnualDividendPerShare_growth_rate":np.nan}, 1)
-        feats["33 Sector(Code)"]=stock_data["33 Sector(Code)"].values[0]
-        feats["17 Sector(Code)"]=stock_data["17 Sector(Code)"].values[0]
         # 銘柄コードを設定
         feats["code"] = code
-        
-        feats1 = feats[start_dt :].copy()
 
-        return feats1
+
+        return feats
 
     @classmethod
     def get_feature_columns(cls, dfs, train_X):
@@ -503,7 +482,7 @@ class ScoringService(object):
 
         # テクニカル
         technical_cols = [
-            x for x in train_X.columns if (x not in ["code", "33 Sector(Code)", "17 Sector(Code)"])
+            x for x in train_X.columns if (x != "code")
         ]
         columns = {
             "technical": technical_cols,
@@ -635,12 +614,7 @@ class ScoringService(object):
         for code in codes:
             buff.append(cls.get_features_for_predict(cls.dfs, code, start_dt))
         feats = pd.concat(buff)
-        fin_columns = ["Net_income_per_stock","PBR","stability","ROE","ROA","market_cap"]
-        for fin_column in fin_columns:
-            print(feats[fin_column].describe())
-            feature_index = feats.index
-            feats = cls.sector_diff(feats,fin_column)
-            feats.index = feature_index
+
         # 結果を以下のcsv形式で出力する
         # １列目:datetimeとcodeをつなげたもの(Ex 2016-05-09-1301)
         # ２列目:label_high_20　終値→最高値への変化率
